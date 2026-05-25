@@ -1,0 +1,16 @@
+{
+  "listenbrainz_user": "YOUR_USERNAME",
+
+  "music_dir": "./Music",
+
+  "bad_words": [
+    "slowed",
+    "reverb",
+    "sped up",
+    "live",
+    "concert",
+    "8d",
+    "bass boosted",
+    "edit"
+  ]
+}
