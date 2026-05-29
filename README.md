@@ -2,30 +2,28 @@
 
 > ⚠️ Please keep in mind that this is a vibecoded project.
 
-BrainzPod syncs your ListenBrainz recommendation playlists, downloads clean audio from YouTube using yt-dlp, embeds proper metadata + album art, and organizes everything into beautiful playlist folders ready for:
+BrainzPod syncs your ListenBrainz recommendation playlists, downloads pristine audio from **JioSaavn** (as a primary source) and **YouTube** (via yt-dlp as a fallback), embeds highly accurate iTunes metadata + album art, and organizes everything into beautiful playlist folders ready for:
 
 - iPods
 - Rockbox
 - Foobar2000
-- iTunes
+- iTunes / Apple Music
 - Jellyfin
-- offline music libraries
+- Offline music libraries
 
 ---
 
 # Features ✨
 
-- Sync ListenBrainz recommendation playlists
-- Download single songs
-- Download full albums
-- Proper metadata embedding
-- Embedded album art
-- Soundtrack / OST support
-- Album Artist support for correct iPod grouping
-- MP3 conversion via FFmpeg
-- Playlist selection CLI
-- iPod-friendly folder structure
-- No streaming subscriptions required
+- **Dual-Provider Downloading:** Fetches original `.mp4` audio streams from JioSaavn first for maximum quality, seamlessly falling back to `yt-dlp` (`.mp3`) if the track isn't available.
+- **Intelligent Duration Matching:** Verifies JioSaavn search results against official iTunes track lengths. Automatically discards bootlegs, remixes, or fake tracks if the duration is off by more than 10 seconds.
+- **Sync ListenBrainz recommendation playlists**
+- **Download single songs and full albums**
+- **Advanced Metadata Embedding:** Automatically applies iTunes-grade metadata to both `.mp4` and `.mp3` files (including Cover Art, Title, Artist, Album, Genre, and Year) using `mutagen`.
+- **Album Artist Support:** Groups soundtracks and compilations perfectly in iPods/iTunes, preventing multi-artist albums (like Bollywood soundtracks) from splitting.
+- **Playlist selection CLI**
+- **iPod-friendly folder structure**
+- **No streaming subscriptions required**
 
 ---
 
@@ -34,8 +32,8 @@ BrainzPod syncs your ListenBrainz recommendation playlists, downloads clean audi
 ```text
 Music/
 ├── Weekly Jams/
-│   ├── Joji - Slow Dancing in the Dark.mp3
-│   ├── Kendrick Lamar - luther.mp3
+│   ├── Joji - Slow Dancing in the Dark.mp4
+│   ├── Kendrick Lamar - luther.mp4
 │   └── ...
 │
 ├── Weekly Exploration/
@@ -43,22 +41,21 @@ Music/
 │   └── ...
 │
 ├── Qala (Soundtrack from the Netflix Film)/
-│   ├── Amit Trivedi - Ghodey Pe Sawaar.mp3
+│   ├── Amit Trivedi - Ghodey Pe Sawaar.mp4
 │   └── ...
 │
 └── Singles/
-    └── Nujabes - Aruarian Dance.mp3
+    └── Nujabes - Aruarian Dance.mp4
 ```
 
 All files contain:
-
-- title
-- artist
-- album
-- album artist
-- genre
-- release year
-- embedded cover art
+- Title
+- Artist
+- Album
+- Album Artist (Prevents library splitting)
+- Genre
+- Release Year
+- Embedded Cover Art (500x500 or 1000x1000 Resolution)
 
 ---
 
@@ -82,7 +79,6 @@ https://ffmpeg.org/download.html
 Add FFmpeg to PATH.
 
 Verify:
-
 ```bash
 ffmpeg -version
 ```
@@ -91,15 +87,19 @@ ffmpeg -version
 
 ## Install Python dependencies
 
+Install the required modules for audio fetching, metadata parsing, and stream decryption:
+
 ```bash
-pip install yt-dlp requests mutagen
+pip install yt-dlp requests mutagen pyDes
 ```
+
+> **Note:** The `pyDes` module is required to natively decrypt JioSaavn media URLs directly in Python.
 
 ---
 
 # Configuration
 
-Create a `config.json` file:
+Create a `config.json` file in the root directory:
 
 ```json
 {
@@ -147,7 +147,7 @@ Select playlists:
 ## Download a single song
 
 ```bash
-py sync.py song "Joji - Slow Dancing in the Dark"
+py sync.py song "Joji Yeah Right"
 ```
 
 ---
@@ -158,54 +158,49 @@ py sync.py song "Joji - Slow Dancing in the Dark"
 py sync.py album "Qala"
 ```
 
-Works great with:
-
-- movie soundtracks
-- anime OSTs
-- compilations
+Works flawlessly with:
+- Movie soundtracks
+- Anime OSTs
+- Compilations
 - Bollywood albums
-- game soundtracks
+- Game soundtracks
 
 ---
 
 # How It Works 🧠
 
 ```text
-ListenBrainz
+ListenBrainz / CLI Input
         ↓
-Recommendation playlists
+Metadata Enrichment (iTunes API)
         ↓
-yt-dlp audio retrieval
+Primary Source: JioSaavn Search (Verifies via Track Duration)
         ↓
-Metadata enrichment
+Fallback Source: yt-dlp (YouTube Search)
         ↓
-Album art embedding
+Album Art & ID3/MP4 Metadata Embedding (mutagen)
         ↓
-iPod-ready MP3 library
+iPod-ready Local Library
 ```
 
 Metadata and cover art are fetched from:
-
 - Apple Music/iTunes APIs
-- MusicBrainz ecosystem metadata
+- JioSaavn Metadata (Fallback)
 
-YouTube is used only as the audio source.
+JioSaavn and YouTube are used solely as the audio delivery systems.
 
 ---
 
 # Why BrainzPod Exists
 
 Streaming services solved convenience.
-
 They also quietly deleted:
-
 - ownership
 - permanence
 - intentional listening
 - weird little MP3 rituals
 
 BrainzPod is for people who still enjoy:
-
 - offline libraries
 - curated playlists
 - retro music players
@@ -218,40 +213,16 @@ BrainzPod is for people who still enjoy:
 
 BrainzPod does not host or distribute music.
 
-It retrieves publicly accessible media using yt-dlp. Users are responsible for complying with local laws and platform terms of service.
-
----
-
-# Roadmap 🛣️
-
-Planned ideas:
-
-- Lyrics embedding
-- MusicBrainz duration verification
-- Duplicate detection
-- Concurrent downloads
-- ReplayGain normalization
-- Automatic latest-playlist sync
-- Rockbox playlist export
-- Jellyfin integration
-- Automatic iPod syncing
-- Better metadata providers
-- Configurable download quality
+It acts as an automated search tool that retrieves publicly accessible media. Users are responsible for complying with local laws and platform terms of service.
 
 ---
 
 # Credits ❤️
 
-Powered by:
-
+Powered by logic and structures originally inspired by:
 - ListenBrainz
 - MusicBrainz
 - yt-dlp
 - FFmpeg
 - Mutagen
-
----
-
-# BrainzPod 🎵
-
-> Open metadata. Offline music. Tiny glowing clickwheel.
+- JioSaavn integration inspired by [Saavn-Downloader](https://github.com/inovachrono/Saavn-Downloader)
