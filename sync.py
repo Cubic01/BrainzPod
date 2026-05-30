@@ -8,6 +8,18 @@ from pathlib import Path
 import sys
 sys.stdout.reconfigure(encoding="utf-8")
 import argparse
+from rich.console import Console
+from rich.prompt import Prompt
+from rich.panel import Panel
+from rich.theme import Theme
+
+console = Console(theme=Theme({
+    "info": "cyan",
+    "warning": "yellow",
+    "danger": "bold red",
+    "success": "bold green"
+}))
+
 from mutagen.id3 import TPE2
 from mutagen.id3 import (
     ID3,
@@ -97,6 +109,161 @@ def get_tracks(playlist_id):
 
     return tracks
 
+def get_youtube_tracks(url):
+    console.print(f"  [info]Parsing YouTube Playlist:[/info] {url}")
+    cmd = ["yt-dlp", "--flat-playlist", "--dump-json", url]
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="ignore")
+    
+    if result.returncode != 0:
+        console.print("[danger]Failed to fetch YouTube playlist[/danger]")
+        return "", []
+        
+    lines = [line for line in result.stdout.split('\n') if line.strip()]
+    tracks = []
+    playlist_title = "YouTube Playlist"
+    
+    for line in lines:
+        try:
+            data = json.loads(line)
+            if not tracks and "playlist_title" in data:
+                playlist_title = data["playlist_title"]
+            
+            title = data.get("title", "").strip()
+            artist = data.get("uploader", "").strip()
+            if title and title != "[Private video]" and title != "[Deleted video]":
+                tracks.append({"title": title, "artist": artist})
+        except:
+            pass
+            
+    return playlist_title, tracks
+
+def get_apple_music_tracks(url):
+    console.print(f"  [info]Parsing Apple Music Playlist:[/info] {url}")
+    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    r.encoding = 'utf-8'
+    import html
+    import json
+    playlist_title = "Apple Music Playlist"
+    tracks = []
+    
+    title_match = re.search(r'<meta property="og:title" content="([^"]+)"', r.text)
+    if title_match:
+        t = html.unescape(title_match.group(1).strip())
+        t = t.split(" by ")[0]
+        playlist_title = t.replace("\u200e", "").strip()
+        
+    match = re.search(r'<script type="application/json" id="serialized-server-data">(.*?)</script>', r.text, re.DOTALL)
+    if match:
+        try:
+            data = json.loads(match.group(1))
+            
+            def extract_songs(obj):
+                if isinstance(obj, dict):
+                    # Check if it's a song
+                    if "artistName" in obj and "playAction" in obj:
+                        title = obj.get("title") or obj.get("trackName")
+                        artist = obj.get("artistName")
+                        if title and artist:
+                            tracks.append({"title": html.unescape(title), "artist": html.unescape(artist)})
+                    for v in obj.values():
+                        extract_songs(v)
+                elif isinstance(obj, list):
+                    for i in obj:
+                        extract_songs(i)
+                        
+            extract_songs(data)
+            
+            # Deduplicate while preserving order
+            seen = set()
+            dedup = []
+            for t in tracks:
+                k = (t["title"], t["artist"])
+                if k not in seen:
+                    dedup.append(t)
+                    seen.add(k)
+            tracks = dedup
+        except Exception as e:
+            console.print(f"[danger]Apple Music JSON Parse Error:[/danger] {e}")
+            
+    return playlist_title, tracks
+
+def get_spotify_tracks(url):
+    console.print(f"  [info]Parsing Spotify Playlist:[/info] {url}")
+    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    r.encoding = 'utf-8'
+    import html
+    playlist_title = "Spotify Playlist"
+    tracks = []
+    
+    title_match = re.search(r'<meta property="og:title" content="([^"]+)"', r.text)
+    if title_match:
+        playlist_title = html.unescape(title_match.group(1).strip())
+        
+    rows = r.text.split('data-testid="track-row"')
+    for row in rows[1:]:
+        # Track title is inside the link to the track itself:
+        # href="/track/..." ... ><span ...>TRACK NAME</span>
+        t_match = re.search(r'href="/track/[^"]+".*?<span[^>]*>([^<]+)</span>', row)
+        a_match = re.search(r'href="/artist/[^"]+">([^<]+)</a>', row)
+        if t_match and a_match:
+            tracks.append({
+                "title": html.unescape(t_match.group(1)),
+                "artist": html.unescape(a_match.group(1))
+            })
+            
+    return playlist_title, tracks
+
+def get_jiosaavn_tracks(url):
+    console.print(f"  [info]Parsing JioSaavn Playlist:[/info] {url}")
+    r = requests.get(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+    r.encoding = 'utf-8'
+    import html
+    playlist_title = "JioSaavn Playlist"
+    tracks = []
+    
+    title_match = re.search(r'<meta property="og:title" content="([^"]+)"', r.text)
+    if title_match:
+        t = html.unescape(title_match.group(1).strip())
+        t = t.split(" | ")[0]
+        playlist_title = t.strip()
+        
+    # Search for INITIAL_DATA
+    match = re.search(r'window\.__INITIAL_DATA__\s*=\s*(.*?});', r.text, re.DOTALL)
+    if not match:
+        match = re.search(r'window\.__INITIAL_DATA__\s*=\s*(\{.*?\})\n', r.text)
+        
+    if match:
+        try:
+            json_str = match.group(1).strip()
+            if json_str.endswith('});'):
+                json_str = json_str[:-2]
+            data = json.loads(json_str)
+            playlist = data.get('playlist', {}).get('playlist', {})
+            if "title" in playlist:
+                 playlist_title = playlist["title"]
+            for t in playlist.get('list', []):
+                tracks.append({
+                    "title": html.unescape(t.get('title', '')),
+                    "artist": html.unescape(t.get('subtitle', ''))
+                })
+        except:
+            pass
+            
+    # HTML Parsing fallback
+    if not tracks:
+        articles = re.findall(r'<article class="o-snippet o-snippet--draggable".*?</article>', r.text, re.DOTALL)
+        for art in articles:
+            t_match = re.search(r'href="/song/[^"]+">([^<]+)</a>', art)
+            if not t_match:
+                continue
+            title = html.unescape(t_match.group(1).strip())
+            
+            a_matches = re.findall(r'href="/artist/[^"]+">\s*(?:<!--.*?-->)?\s*([^<]+)</a>', art)
+            artist = html.unescape(", ".join([a.strip() for a in a_matches]))
+            tracks.append({"title": title, "artist": artist})
+            
+    return playlist_title, tracks
+
 
 def enrich_metadata(track):
     query = f"{track['title']} {track['artist']}"
@@ -180,8 +347,8 @@ def download_song(track, outdir):
 
     query = f"{title} {artist} official audio"
 
-    print(f"Searching JioSaavn: {title} {artist}")
-    saavn_result = search_jiosaavn(f"{title} {artist}")
+    console.print(f"  [info]Searching JioSaavn:[/info] {title}")
+    saavn_result = search_jiosaavn(title)
     
     import html
     if saavn_result:
@@ -190,9 +357,9 @@ def download_song(track, outdir):
         
         is_duration_match = True
         if expected_duration > 0 and saavn_duration > 0:
-            if abs(expected_duration - saavn_duration) > 10:
+            if abs(expected_duration - saavn_duration) > 20:
                 is_duration_match = False
-                print(f"Duration mismatch! Expected {expected_duration:.0f}s, got {saavn_duration}s. Falling back to yt-dlp.")
+                console.print(f"  [warning]Duration mismatch! Expected {expected_duration:.0f}s, got {saavn_duration}s. Falling back to yt-dlp.[/warning]")
                 
         if is_duration_match:
             # Only overwrite title and artist if we don't already have a valid artist. 
@@ -216,38 +383,45 @@ def download_song(track, outdir):
 
     safe_name = sanitize(track["title"])
 
-    final_mp4 = outdir / f"{safe_name}.mp4"
     final_mp3 = outdir / f"{safe_name}.mp3"
 
-    if final_mp4.exists():
-        print(f"Skipping existing: {safe_name}")
-        return final_mp4
     if final_mp3.exists():
-        print(f"Skipping existing: {safe_name}")
+        console.print(f"  [dim]Skipping existing:[/dim] {safe_name}")
         return final_mp3
 
     if saavn_result and "encrypted_media_url" in saavn_result:
         try:
-            print("Downloading from JioSaavn...")
+            console.print("  [info]Downloading from JioSaavn...[/info]")
             dec_url = get_dec_url(saavn_result["encrypted_media_url"])
             
-            # Download mp4 directly without ffmpeg conversion
-            with requests.get(dec_url, stream=True, timeout=60) as r:
-                r.raise_for_status()
-                with open(final_mp4, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
+            # Use ffmpeg to download the stream and convert directly to mp3
+            cmd = [
+                "ffmpeg",
+                "-y",
+                "-i", dec_url,
+                "-vn",
+                "-c:a", "libmp3lame",
+                "-q:a", "0",
+                str(final_mp3)
+            ]
             
-            if final_mp4.exists():
-                return final_mp4
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="ignore"
+            )
+            
+            if result.returncode == 0 and final_mp3.exists():
+                return final_mp3
             else:
-                print("JioSaavn download failed, falling back to yt-dlp")
+                console.print("  [warning]JioSaavn download failed, falling back to yt-dlp[/warning]")
         except Exception as e:
-            print("JioSaavn processing failed:", e)
-            print("Falling back to yt-dlp")
+            console.print(f"  [danger]JioSaavn processing failed:[/danger] {e}")
+            console.print("  [warning]Falling back to yt-dlp[/warning]")
 
-    print("Searching YouTube:", query)
+    console.print(f"  [info]Searching YouTube:[/info] {query}")
 
     cmd = [
         "yt-dlp",
@@ -432,10 +606,10 @@ def download_single_song(query):
 
     if mp3:
         embed_metadata(mp3, track)
-        print("Finished")
+        console.print("[success]Finished single download![/success] 🎉")
 
 def download_album(album_name):
-    print(f"Searching album: {album_name}")
+    console.print(f"\n[bold magenta]Searching album:[/bold magenta] {album_name}")
 
     url = "https://itunes.apple.com/search"
 
@@ -476,7 +650,7 @@ def download_album(album_name):
 
     tracks = lookup["results"][1:]
 
-    print(f"Tracks found: {len(tracks)}")
+    console.print(f"[success]Tracks found:[/success] {len(tracks)}\n")
 
     for idx, t in enumerate(tracks, start=1):
 
@@ -496,9 +670,9 @@ def download_album(album_name):
             "duration": t.get("trackTimeMillis", 0) / 1000.0
         }
 
-        print(
-            f"[{idx}/{len(tracks)}] "
-            f"{track['artist']} - {track['title']}"
+        console.print(
+            f"[bold blue][{idx}/{len(tracks)}][/bold blue] "
+            f"[bold white]{track['artist']}[/bold white] - [dim]{track['title']}[/dim]"
         )
 
         mp3 = download_song(track, folder)
@@ -506,19 +680,15 @@ def download_album(album_name):
         if mp3:
             embed_metadata(mp3, track)
 
-    print("Album finished")
+    console.print("\n[success]Album finished![/success] 🎧")
 
 def select_playlists(playlists):
-    print("\nAvailable playlists:\n")
+    console.print(Panel("Available Playlists", expand=False, style="bold cyan"))
 
     for idx, playlist in enumerate(playlists, start=1):
-        print(f"[{idx}] {playlist['title']}")
+        console.print(f"[magenta][{idx}][/magenta] {playlist['title']}")
 
-    print("\nType playlist numbers separated by commas")
-    print("Example: 1,2")
-    print("Or type: all")
-
-    choice = input("\nSelect playlists: ").strip()
+    choice = Prompt.ask("\n[bold yellow]Type playlist numbers (e.g. 1,2) or 'all'[/bold yellow]").strip()
 
     if choice.lower() == "all":
         return playlists
@@ -577,24 +747,47 @@ def main():
         download_album(query)
         return
 
-    playlists = get_playlists()
-
-    if not playlists:
-        print("No playlists found")
-        return
-
-    playlists = select_playlists(playlists)
-
-    if not playlists:
-        print("Nothing selected")
-        return
+    if args.mode == "playlist" and query:
+        # Check if it's a URL
+        if "http" in query:
+            url = query
+            if "youtube.com" in url or "youtu.be" in url:
+                playlist_title, tracks = get_youtube_tracks(url)
+            elif "apple.com" in url:
+                playlist_title, tracks = get_apple_music_tracks(url)
+            elif "spotify.com" in url:
+                playlist_title, tracks = get_spotify_tracks(url)
+            elif "jiosaavn.com" in url:
+                playlist_title, tracks = get_jiosaavn_tracks(url)
+            else:
+                print("Unsupported platform URL")
+                return
+                
+            if not tracks:
+                print("No tracks found in the playlist.")
+                return
+                
+            playlists = [{"title": playlist_title, "id": "url", "tracks": tracks}]
+        else:
+            # Maybe they meant 'album' or 'song'? 
+            print("To sync a specific playlist URL, use: py sync.py playlist <url>")
+            return
+    else:
+        playlists = get_playlists()
+        if not playlists:
+            print("No playlists found")
+            return
+    
+        playlists = select_playlists(playlists)
+    
+        if not playlists:
+            print("Nothing selected")
+            return
 
     for playlist in playlists:
         pname = sanitize(playlist["title"])
 
-        print(f"\n==========")
-        print(f"Playlist: {pname}")
-        print("==========")
+        console.print(Panel(f"Syncing Playlist: [bold white]{pname}[/bold white]", expand=False, style="bold magenta"))
 
         folder = MUSIC_DIR / pname
 
@@ -606,15 +799,20 @@ def main():
             exist_ok=True
         )
 
-        tracks = get_tracks(playlist["id"])
+        if "tracks" in playlist:
+            # Tracks were already extracted from URL
+            tracks = playlist["tracks"]
+        else:
+            # Fetch tracks from ListenBrainz
+            tracks = get_tracks(playlist["id"])
 
-        print(f"Tracks found: {len(tracks)}")
+        console.print(f"[success]Tracks found:[/success] {len(tracks)}\n")
 
         for idx, track in enumerate(tracks, start=1):
 
-            print(
-                f"\n[{idx}/{len(tracks)}] "
-                f"{track['artist']} - {track['title']}"
+            console.print(
+                f"[bold blue][{idx}/{len(tracks)}][/bold blue] "
+                f"[bold white]{track['artist']}[/bold white] - [dim]{track['title']}[/dim]"
             )
 
             track = enrich_metadata(track)
