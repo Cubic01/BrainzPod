@@ -17,7 +17,7 @@ BrainzPod syncs your ListenBrainz recommendation playlists, downloads clean audi
 Ensure you have Python 3.8+ and **FFmpeg** installed on your system.
 
 ```bash
-pip install requests yt-dlp mutagen rich beautifulsoup4
+pip install -r requirements.txt
 ```
 
 *For ListenBrainz sync:* Create a `config.json` with your username (`"listenbrainz_user": "USERNAME"`).
